@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ProfitScan - Single Page Application</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <button class="logout-btn" onclick="location.href='/logout'">Logout</button>
+
+    <div class="container">
+        <h1>ProfitScan - Financial Analysis Tool</h1>
+
+        <div class="tab-container">
+            <div class="tab-buttons">
+                <button class="tab-button active" data-tab="upload">Upload Files</button>
+                <button class="tab-button" data-tab="allocation">Allocation Rules</button>
+                <button class="tab-button" data-tab="results">Results</button>
+            </div>
+
+            <div class="tab-content">
+                <!-- Upload Files Tab -->
+                <div class="tab-pane active" id="upload">
+                    <h2>Upload Data Files</h2>
+                    <form id="uploadForm" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label for="customers_file">Customers File</label>
+                            <input type="file" name="customers_file" id="customers_file" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="invoices_file">Invoices File</label>
+                            <input type="file" name="invoices_file" id="invoices_file" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="products_file">Products File</label>
+                            <input type="file" name="products_file" id="products_file" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="expenses_file">Expenses File</label>
+                            <input type="file" name="expenses_file" id="expenses_file" required>
+                        </div>
+
+                        <button type="submit">Upload Files</button>
+                    </form>
+
+                    <div class="loading" id="uploadLoading">
+                        <div class="loading-spinner"></div>
+                        <p>Uploading files...</p>
+                    </div>
+                </div>
+
+                <!-- Allocation Rules Tab -->
+                <div class="tab-pane" id="allocation">
+                    <h2>Expense Allocation Rules</h2>
+
+                    <div class="action-buttons">
+                        <button id="processBtn" class="secondary">Process Data</button>
+                        <button onclick="saveAllAllocationRules()" class="secondary">Save Allocation Rules</button>
+                    </div>
+
+                    <div id="allocationContent"></div>
+
+                    <!-- Preview Section -->
+                    <div class="preview-container" id="previewContainer" style="display: none;">
+                        <div class="preview-header">
+                            <div class="preview-title">Data Preview</div>
+                            <button onclick="togglePreview()" class="secondary">Hide Preview</button>
+                        </div>
+                        <div class="table-container" id="previewTable"></div>
+                    </div>
+
+                    <div class="loading" id="allocationLoading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading allocation rules...</p>
+                    </div>
+
+                    <div class="loading" id="processingLoading">
+                        <div class="loading-spinner"></div>
+                        <p>Processing data...</p>
+                    </div>
+                </div>
+
+                <!-- Results Tab -->
+                <div class="tab-pane" id="results">
+                    <h2>Results</h2>
+                    <div id="resultsContent"></div>
+                    <div class="loading" id="resultsLoading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading results...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for allocation rules -->
+    <div id="allocationModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modalTitle">Allocation Rules</h2>
+            <div id="modalContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentExpenses = [];
+        let currentAllColumns = [];
+        let currentProcessedHtml = '';
+        let currentExpensesHtml = '';
+        let isPreviewVisible = false;
+
+        // Tab management
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+
+                button.classList.add('active');
+                document.getElementById(button.dataset.tab).classList.add('active');
+
+
+                if (button.dataset.tab === 'results') {
+                    loadResults();
+                }
+            });
+        });
+
+        // Modal management
+        const modal = document.getElementById('allocationModal');
+        const closeBtn = document.querySelector('.close');
+
+        closeBtn.onclick = function() {
+            modal.style.display = 'none';
+        }
+
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // Toggle preview
+        function togglePreview() {
+            const previewContainer = document.getElementById('previewContainer');
+            isPreviewVisible = !isPreviewVisible;
+            previewContainer.style.display = isPreviewVisible ? 'block' : 'none';
+
+            if (isPreviewVisible && !document.getElementById('previewTable').innerHTML) {
+                loadPreview();
+            }
+        }
+
+        // Load preview data
+        async function loadPreview() {
+            try {
+                const response = await fetch('/api/preview');
+                const result = await response.json();
+
+                if (result.success) {
+                    document.getElementById('previewTable').innerHTML = result.preview_html;
+                }
+            } catch (error) {
+                console.error('Error loading preview:', error);
+            }
+        }
+
+        // File upload
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData();
+            formData.append('customers_file', document.getElementById('customers_file').files[0]);
+            formData.append('invoices_file', document.getElementById('invoices_file').files[0]);
+            formData.append('products_file', document.getElementById('products_file').files[0]);
+            formData.append('expenses_file', document.getElementById('expenses_file').files[0]);
+
+            showLoading('uploadLoading');
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showAlert('Files uploaded successfully!', 'success');
+                    document.querySelector('[data-tab="allocation"]').click();
+                    loadAllocationRules();
+                } else {
+                    showAlert('Error: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
+            } finally {
+                hideLoading('uploadLoading');
+            }
+        });
+
+        // Load allocation rules
+        async function loadAllocationRules() {
+            showLoading('allocationLoading');
+
+            try {
+                const response = await fetch('/api/allocation/rules');
+                const result = await response.json();
+
+                if (result.success) {
+                    currentExpenses = result.expenses;
+                    currentAllColumns = result.all_columns;
+                    renderAllocationForm(result.expenses, result.all_columns);
+
+                    // Show preview button
+                    document.getElementById('previewContainer').style.display = 'block';
+                    isPreviewVisible = true;
+                    loadPreview();
+                } else {
+                    showAlert('Error loading allocation rules', 'error');
+                }
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
+            } finally {
+                hideLoading('allocationLoading');
+            }
+        }
+
+        // Render allocation form
+        function renderAllocationForm(expenses, allColumns) {
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    <details>
+                        <summary style="cursor: pointer; color: #ffa726; font-weight: bold;">
+                            Instructions
+                        </summary>
+                        <ul style="color: #cccccc;">
+                            <li>Click on any expense to configure allocation rules</li>
+                            <li>Use format: Feature=Value (e.g., City=Orlando)</li>
+                            <li>Use ; for multiple conditions (AND): City=Orlando;Customer=John</li>
+                            <li>Use | for alternative matches (OR): City=Orlando|New York</li>
+                            <li>Leave empty to allocate to all characteristics</li>
+                        </ul>
+                    </details>
+                </div>
+
+                <div class="expenses-list">
+            `;
+
+            expenses.forEach((expense, index) => {
+                const amount = expense.Amount ? parseFloat(expense.Amount).toFixed(2) : '0.00';
+                const allocation = expense.Allocate_To || 'Not configured';
+                const tranPercentage = Math.round((expense.Allocate_By_Tran || 0.5) * 100);
+
+                html += `
+                    <div class="expense-item" onclick="openAllocationModal(${index})">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h3 style="margin: 0; color: #90caf9;">${expense.Expense}</h3>
+                                <p style="margin: 5px 0; color: #cccccc;">Amount: $${amount}</p>
+                                <p style="margin: 0; color: #aaaaaa; font-size: 0.9em;">
+                                    Allocation: ${allocation}
+                                </p>
+                                <p style="margin: 0; color: #64b5f6; font-size: 0.9em;">
+                                    Transaction Allocation: ${tranPercentage}%
+                                </p>
+                            </div>
+                            <span style="color: #64b5f6;">▶</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+
+            document.getElementById('allocationContent').innerHTML = html;
+        }
+
+        // Open allocation modal
+        function openAllocationModal(index) {
+            const expense = currentExpenses[index];
+            const modalTitle = document.getElementById('modalTitle');
+            const modalContent = document.getElementById('modalContent');
+
+            modalTitle.textContent = `Allocation Rules for ${expense.Expense}`;
+
+            // Calculate current percentage values
+            const currentTranPercentage = Math.round((expense.Allocate_By_Tran || 0.5) * 100);
+            const currentValuePercentage = 100 - currentTranPercentage;
+
+            let html = `
+                <div class="allocation-rules-container">
+                    <h3>Amount: $${expense.Amount ? parseFloat(expense.Amount).toFixed(2) : '0.00'}</h3>
+
+                    <div id="rulesContainer_${index}">
+            `;
+
+            // Add existing rules or create new one
+            const allocations = expense.Allocate_To ? expense.Allocate_To.split(';') : ['all'];
+
+            allocations.forEach((allocation, ruleIndex) => {
+                html += createRuleHtml(index, ruleIndex, allocation, currentAllColumns);
+            });
+
+            html += `
+                    </div>
+
+                    <button class="add-rule" onclick="addRule(${index})">+ Add Rule</button>
+
+                    <div class="allocation-slider-container">
+                        <div class="slider-header">
+                            <label>Transaction Allocation Percentage:</label>
+                            <span class="slider-value" id="tranPercentageValue_${index}">${currentTranPercentage}%</span>
+                        </div>
+
+                        <input type="range" id="tranSlider_${index}" min="0" max="100" value="${currentTranPercentage}"
+                               oninput="updateAllocationPercentages(${index}, this.value)">
+
+                        <div class="slider-labels">
+                            <span>100% By Value</span>
+                            <span>100% By Transaction</span>
+                        </div>
+
+                        <div class="allocation-breakdown">
+                            <div class="breakdown-item">
+                                <span class="breakdown-label">By Transaction:</span>
+                                <span class="breakdown-value" id="tranAmount_${index}">$${(expense.Amount * (currentTranPercentage / 100)).toFixed(2)}</span>
+                            </div>
+                            <div class="breakdown-item">
+                                <span class="breakdown-label">By Value:</span>
+                                <span class="breakdown-value" id="valueAmount_${index}">$${(expense.Amount * (currentValuePercentage / 100)).toFixed(2)}</span>
+                            </div>
+                            <div class="breakdown-item">
+                                <span class="breakdown-label">Total:</span>
+                                <span class="breakdown-value">$${expense.Amount ? parseFloat(expense.Amount).toFixed(2) : '0.00'}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="applyWeight_${index}" ${expense.Apply_Weight ? 'checked' : ''}>
+                            Apply weight?
+                        </label>
+                    </div>
+
+                    <button onclick="saveAllocationRules(${index})" class="secondary">Save Rules</button>
+                </div>
+            `;
+
+            modalContent.innerHTML = html;
+            modal.style.display = 'block';
+
+            // Initialize factor values for all rules
+            for (let i = 0; i < allocations.length; i++) {
+                updateFactorValues(index, i);
+            }
+        }
+
+        // Create rule HTML
+        function createRuleHtml(expenseIndex, ruleIndex, allocation, allColumns) {
+            let selectedFactor = 'All';
+            let selectedValue = '';
+
+            if (allocation && allocation.toLowerCase() !== 'all') {
+                const parts = allocation.split('=');
+                if (parts.length === 2) {
+                    selectedFactor = parts[0];
+                    selectedValue = parts[1];
+                }
+            }
+
+            // Filter out duplicate "All" options
+            const filteredColumns = allColumns.filter((value, index, self) =>
+                self.indexOf(value) === index
+            );
+
+            return `
+                <div class="allocation-rule" id="rule_${expenseIndex}_${ruleIndex}">
+                    <div class="rule-header">
+                        <h4>Rule ${ruleIndex + 1}</h4>
+                        <button class="remove-rule" onclick="removeRule(${expenseIndex}, ${ruleIndex})">Remove</button>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Allocation Factor:</label>
+                        <select id="factor_${expenseIndex}_${ruleIndex}" onchange="updateFactorValues(${expenseIndex}, ${ruleIndex})">
+                            ${filteredColumns.map(col =>
+                                `<option value="${col}" ${selectedFactor === col ? 'selected' : ''}>
+                                    ${col}
+                                </option>`
+                            ).join('')}
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="valueContainer_${expenseIndex}_${ruleIndex}"
+                         style="${selectedFactor === 'All' ? 'display: none;' : ''}">
+                        <label>Factor Value:</label>
+                        <select id="value_${expenseIndex}_${ruleIndex}">
+                            <!-- Values will be populated dynamically -->
+                        </select>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Add rule
+        function addRule(expenseIndex) {
+            const rulesContainer = document.getElementById(`rulesContainer_${expenseIndex}`);
+            const ruleCount = rulesContainer.children.length;
+
+            const newRuleHtml = createRuleHtml(expenseIndex, ruleCount, 'all', currentAllColumns);
+            rulesContainer.insertAdjacentHTML('beforeend', newRuleHtml);
+
+            updateFactorValues(expenseIndex, ruleCount);
+        }
+
+        // Remove rule
+        function removeRule(expenseIndex, ruleIndex) {
+            const ruleElement = document.getElementById(`rule_${expenseIndex}_${ruleIndex}`);
+            if (ruleElement) {
+                ruleElement.remove();
+            }
+        }
+
+        // Update factor values
+        async function updateFactorValues(expenseIndex, ruleIndex) {
+            const factorSelect = document.getElementById(`factor_${expenseIndex}_${ruleIndex}`);
+            const valueContainer = document.getElementById(`valueContainer_${expenseIndex}_${ruleIndex}`);
+            const valueSelect = document.getElementById(`value_${expenseIndex}_${ruleIndex}`);
+
+            if (factorSelect.value === 'All') {
+                valueContainer.style.display = 'none';
+            } else {
+                valueContainer.style.display = 'block';
+
+                // Load values for selected factor
+                try {
+                    const response = await fetch(`/api/column_values/${encodeURIComponent(factorSelect.value)}`);
+                    const data = await response.json();
+
+                    if (data.success) {
+                        valueSelect.innerHTML = data.values.map(value =>
+                            `<option value="${value}">${value}</option>`
+                        ).join('');
+
+                        // Try to preserve previous selection if possible
+                        if (currentExpenses[expenseIndex]?.Allocate_To) {
+                            const allocations = currentExpenses[expenseIndex].Allocate_To.split(';');
+                            if (allocations[ruleIndex]) {
+                                const parts = allocations[ruleIndex].split('=');
+                                if (parts.length === 2 && parts[0] === factorSelect.value) {
+                                    valueSelect.value = parts[1];
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error loading column values:', error);
+                }
+            }
+        }
+
+        // Update allocation percentages
+        function updateAllocationPercentages(expenseIndex, tranPercentage) {
+            const expense = currentExpenses[expenseIndex];
+            const tranPercent = parseInt(tranPercentage);
+            const valuePercent = 100 - tranPercent;
+
+            // Update slider value display
+            document.getElementById(`tranPercentageValue_${expenseIndex}`).textContent = `${tranPercent}%`;
+
+            // Update amount breakdown
+            const tranAmount = (expense.Amount * (tranPercent / 100)).toFixed(2);
+            const valueAmount = (expense.Amount * (valuePercent / 100)).toFixed(2);
+
+            document.getElementById(`tranAmount_${expenseIndex}`).textContent = `$${tranAmount}`;
+            document.getElementById(`valueAmount_${expenseIndex}`).textContent = `$${valueAmount}`;
+        }
+
+        // Save allocation rules for single expense
+        function saveAllocationRules(expenseIndex) {
+            const rules = [];
+            const rulesContainer = document.getElementById(`rulesContainer_${expenseIndex}`);
+
+            // Collect all rules
+            for (let i = 0; i < rulesContainer.children.length; i++) {
+                const factorSelect = document.getElementById(`factor_${expenseIndex}_${i}`);
+                const valueSelect = document.getElementById(`value_${expenseIndex}_${i}`);
+
+                let rule = factorSelect.value;
+                if (rule !== 'All' && valueSelect && valueSelect.value) {
+                    rule += `=${valueSelect.value}`;
+                } else if (rule === 'All') {
+                    rule = 'all';
+                }
+                rules.push(rule);
+            }
+
+            const tranPercentage = parseInt(document.getElementById(`tranSlider_${expenseIndex}`).value);
+            const applyWeight = document.getElementById(`applyWeight_${expenseIndex}`).checked;
+
+            // Save rules for this expense
+            currentExpenses[expenseIndex].Allocate_To = rules.join(';');
+            currentExpenses[expenseIndex].Allocate_By_Tran_Percentage = tranPercentage;
+            currentExpenses[expenseIndex].Allocate_By_Tran = tranPercentage / 100.0;
+            currentExpenses[expenseIndex].Allocate_By_Value = (100 - tranPercentage) / 100.0;
+            currentExpenses[expenseIndex].Apply_Weight = applyWeight;
+
+            // Close modal
+            modal.style.display = 'none';
+
+            showAlert('Allocation rules saved successfully!', 'success');
+
+            // Refresh the allocation form AND update expenses table
+            renderAllocationForm(currentExpenses, currentAllColumns);
+            updateExpensesTable();
+        }
+
+        // Add this new function to update expenses table
+        function updateExpensesTable() {
+            const expensesTableContainer = document.getElementById('expensesTableContainer');
+            if (expensesTableContainer) {
+                // Create HTML table from current expenses data
+                let html = '<table><thead><tr>';
+
+                // Add table headers
+                const columns = ['Expense', 'Amount', 'Allocate_To', 'Allocate_By_Tran', 'Allocate_By_Value', 'Apply_Weight'];
+                columns.forEach(col => {
+                    html += `<th>${col}</th>`;
+                });
+                html += '</tr></thead><tbody>';
+
+                // Add table rows
+                currentExpenses.forEach(expense => {
+                    html += '<tr>';
+                    html += `<td>${expense.Expense || ''}</td>`;
+                    html += `<td>${expense.Amount ? parseFloat(expense.Amount).toFixed(2) : '0.00'}</td>`;
+                    html += `<td>${expense.Allocate_To || 'all'}</td>`;
+                    html += `<td>${expense.Allocate_By_Tran ? (expense.Allocate_By_Tran * 100).toFixed(0) + '%' : '50%'}</td>`;
+                    html += `<td>${expense.Allocate_By_Value ? (expense.Allocate_By_Value * 100).toFixed(0) + '%' : '50%'}</td>`;
+                    html += `<td>${expense.Apply_Weight ? 'Yes' : 'No'}</td>`;
+                    html += '</tr>';
+                });
+
+                html += '</tbody></table>';
+                expensesTableContainer.innerHTML = html;
+
+                // Apply formatting
+                setTimeout(formatExpensesTable, 100);
+            }
+        }
+
+        // Format expenses table with proper styling
+        function formatExpensesTable() {
+            const expensesTable = document.querySelector('#expensesTableContainer table');
+            if (expensesTable) {
+                expensesTable.className = 'data';
+                expensesTable.style.width = '100%';
+                expensesTable.style.borderCollapse = 'collapse';
+
+                // Add styles to headers
+                const headers = expensesTable.querySelectorAll('th');
+                headers.forEach(header => {
+                    header.style.backgroundColor = '#2e2e2e';
+                    header.style.color = '#90caf9';
+                    header.style.padding = '12px';
+                    header.style.border = '1px solid #333';
+                    header.style.textAlign = 'left';
+                });
+
+                // Add styles to cells
+                const cells = expensesTable.querySelectorAll('td');
+                cells.forEach(cell => {
+                    cell.style.padding = '12px';
+                    cell.style.border = '1px solid #333';
+                    cell.style.textAlign = 'left';
+                });
+
+                // Add alternating row colors
+                const rows = expensesTable.querySelectorAll('tr');
+                rows.forEach((row, index) => {
+                    if (index > 0) { // Skip header row
+                        row.style.backgroundColor = index % 2 === 0 ? '#2a2a2a' : '#1e1e1e';
+                    }
+                });
+            }
+        }
+
+        // Save all allocation rules
+        async function saveAllAllocationRules() {
+            showLoading('allocationLoading');
+
+            try {
+                // Prepare data for API call
+                const expensesToUpdate = currentExpenses.map(expense => ({
+                    Expense: expense.Expense,
+                    Amount: expense.Amount,
+                    Allocate_To: expense.Allocate_To || 'all',
+                    Allocate_By_Tran_Percentage: expense.Allocate_By_Tran_Percentage || 50,
+                    Apply_Weight: expense.Apply_Weight || false
+                }));
+
+                const response = await fetch('/api/expenses/update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(expensesToUpdate)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showAlert('All allocation rules saved successfully!', 'success');
+                    // Update expenses table after saving all rules
+                    updateExpensesTable();
+                } else {
+                    showAlert('Error: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
+            } finally {
+                hideLoading('allocationLoading');
+            }
+        }
+
+        // Process data
+        document.getElementById('processBtn').addEventListener('click', async () => {
+            showLoading('processingLoading');
+
+            try {
+                const response = await fetch('/api/process', {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    currentProcessedHtml = result.processed_html;
+                    currentExpensesHtml = result.expenses_html;
+                    showAlert('Data processed successfully!', 'success');
+                    document.querySelector('[data-tab="results"]').click();
+                    loadResults();
+                                    } else {
+                    showAlert('Error: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
+            } finally {
+                hideLoading('processingLoading');
+            }
+        });
+
+        // Load results
+        async function loadResults() {
+            showLoading('resultsLoading');
+
+            try {
+
+                if (currentProcessedHtml && currentExpensesHtml) {
+                    const response = await fetch('/api/results');
+                    const result = await response.json();
+
+                    if (result.success) {
+                        renderResults(currentProcessedHtml, currentExpensesHtml, result.all_columns);
+                    } else {
+                        showAlert('Error loading results', 'error');
+                    }
+                } else {
+
+                    const response = await fetch('/api/results');
+                    const result = await response.json();
+
+                    if (result.success) {
+                        currentProcessedHtml = result.processed_html;
+                        currentExpensesHtml = result.expenses_html;
+                        renderResults(result.processed_html, result.expenses_html, result.all_columns);
+                    } else {
+                        showAlert('Error loading results', 'error');
+                    }
+                }
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
+            } finally {
+                hideLoading('resultsLoading');
+            }
+        }
+
+        // Render results
+        function renderResults(processedHtml, expensesHtml, allColumns) {
+            // Filter out duplicate "All" options
+            const uniqueColumns = allColumns.filter((value, index, self) =>
+                self.indexOf(value) === index
+            );
+
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    <button onclick="location.href='/download/processed-excel'" class="secondary">
+                        Download Excel
+                    </button>
+                    <button onclick="location.href='/download/expenses-excel'" class="secondary" style="margin-left: 10px;">
+                        Download Expenses
+                    </button>
+                </div>
+
+                <div class="results-tab-buttons">
+                    <button class="results-tab-button active" data-result-tab="processed">Processed Data</button>
+                    <button class="results-tab-button" data-result-tab="expenses">Expenses</button>
+                    <button class="results-tab-button" data-result-tab="report">Generate Report</button>
+                </div>
+
+                <div class="results-tab-content">
+                    <div class="results-tab-pane active" id="processedResult">
+                        <div class="table-container">
+                            ${processedHtml}
+                        </div>
+                    </div>
+
+                    <div class="results-tab-pane" id="expensesResult">
+                        <div class="table-container" id="expensesTableContainer">
+                            <!-- Expenses table will be dynamically updated -->
+                        </div>
+                    </div>
+
+                    <div class="results-tab-pane" id="reportResult">
+                        <form id="reportForm">
+                            <div class="form-group">
+                                <label>Report Type:</label>
+                                <select name="report_type">
+                                    <option value="Summary">Summary</option>
+                                    <option value="Detailed">Detailed</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Group By:</label>
+                                <select name="allocation_factor">
+                                    <option value="all">All</option>
+                                    ${uniqueColumns.map(col => `<option value="${col}">${col}</option>`).join('')}
+                                </select>
+                            </div>
+
+                            <button type="submit">Generate Report</button>
+                        </form>
+
+                        <div id="reportOutput"></div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('resultsContent').innerHTML = html;
+
+            // Immediately update expenses table with current data
+            updateExpensesTable();
+
+            // Add result tab handlers
+            document.querySelectorAll('.results-tab-button').forEach(button => {
+                button.addEventListener('click', () => {
+                    document.querySelectorAll('.results-tab-button').forEach(btn => btn.classList.remove('active'));
+                    document.querySelectorAll('.results-tab-pane').forEach(pane => pane.classList.remove('active'));
+
+                    button.classList.add('active');
+                    document.getElementById(button.dataset.resultTab + 'Result').classList.add('active');
+
+                    // If clicking on expenses tab, refresh the table
+                    if (button.dataset.resultTab === 'expenses') {
+                        updateExpensesTable();
+                    }
+                });
+            });
+
+            // Report form handler
+            document.getElementById('reportForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const formData = new FormData(e.target);
+                const reportData = {
+                    report_type: formData.get('report_type'),
+                    allocation_factor: formData.get('allocation_factor')
+                };
+
+                try {
+                    const response = await fetch('/api/report', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(reportData)
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        document.getElementById('reportOutput').innerHTML = `
+                            <div class="report-table-container">
+                                ${result.report_html}
+                            </div>
+                        `;
+                    } else {
+                        showAlert('Error: ' + result.message, 'error');
+                    }
+                } catch (error) {
+                    showAlert('Network error: ' + error.message, 'error');
+                }
+            });
+        }
+
+        // Helper functions
+        function showLoading(id) {
+            document.getElementById(id).style.display = 'block';
+        }
+
+        function hideLoading(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+
+        function showAlert(message, type) {
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+
+            document.querySelector('.container').prepend(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if user is logged in
+            fetch('/api/check_auth')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.authenticated) {
+                        window.location.href = '/login';
+                    }
+                })
+                .catch(error => {
+                    console.error('Auth check error:', error);
+                });
+        });
+    </script>
+</body>
+</html>
