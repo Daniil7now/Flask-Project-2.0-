@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Your Email - ProfitScan</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/verify.css') }}">
+</head>
+<body>
+    <div class="verify-container">
+        <h1>Verify Your Email</h1>
+
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="verify-alert verify-alert-info">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <p>Please check your email inbox for a verification link. If you didn't receive the email, you can resend it.</p>
+
+        <form method="POST" action="{{ url_for('resend_verification') }}">
+            <button type="submit" class="verify-button">Resend Verification Email</button>
+        </form>
+
+        <a href="{{ url_for('logout') }}">
+            <button class="verify-button logout">Logout</button>
+        </a>
+    </div>
+</body>
+</html>
