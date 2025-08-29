@@ -20,7 +20,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Configuration from environment variables
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'fallback-secret-key-change-in-production')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', '')
 app.config['DB_HOST'] = os.getenv('DB_HOST', 'localhost')
 app.config['DB_PORT'] = os.getenv('DB_PORT', '5432')
 app.config['DB_NAME'] = os.getenv('DB_NAME', 'postgres')
