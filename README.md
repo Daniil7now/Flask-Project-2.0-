@@ -12,4 +12,4 @@ How to use:
 2) upload 4 excel tables in the specified format
 3) choose necessary allocation rules
 4) Look at the result
-5) download result table
+5) download result table if necessary
